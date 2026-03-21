@@ -1,10 +1,7 @@
 import { Renderer } from './Renderer';
 import { Runway } from '../entities/Runway';
-import { RUNWAY_COLOR, RUNWAY_MARKING_COLOR, LANDING_STOP_FRACTION, FINAL_APPROACH_X, FINAL_APPROACH_Y, KNOTS_TO_GU_PER_SEC, HOLDING_FIX_X, HOLDING_FIX_Y } from '../config';
+import { RUNWAY_COLOR, RUNWAY_MARKING_COLOR, LANDING_STOP_FRACTION, FINAL_APPROACH_X, FINAL_APPROACH_Y, HOLDING_FIX_X, HOLDING_FIX_Y } from '../config';
 import { degToRad } from '../math/MathUtils';
-import { calcBaseTurnPoint } from '../systems/ApproachSystem';
-import { AircraftSize } from '../types';
-import { AIRCRAFT_PROFILES } from '../config';
 
 export function drawRunway(renderer: Renderer, runway: Runway): void {
   const { ctx } = renderer;
@@ -63,9 +60,10 @@ export function drawRunway(renderer: Renderer, runway: Runway): void {
     : 'OPEN';
   ctx.fillText(status, center.sx, labelY);
 
+  const crossSize = 6;
+
   // Debug: Holding Fix marker
   const hf = renderer.gameToScreen(HOLDING_FIX_X, HOLDING_FIX_Y);
-  const crossSize = 6;
   ctx.strokeStyle = '#00cccc';
   ctx.lineWidth = 1.5;
   ctx.beginPath();
@@ -93,28 +91,4 @@ export function drawRunway(renderer: Renderer, runway: Runway): void {
   ctx.font = '10px monospace';
   ctx.textAlign = 'left';
   ctx.fillText('FP', fp.sx + crossSize + 3, fp.sy + 4);
-
-  // Debug: Base Turn Point markers (one per aircraft size)
-  const sizeColors: [AircraftSize, string][] = [
-    [AircraftSize.SMALL, '#44cc44'],
-    [AircraftSize.MEDIUM, '#4488ff'],
-    [AircraftSize.LARGE, '#ff4444'],
-  ];
-  for (const [size, color] of sizeColors) {
-    const speedGU = AIRCRAFT_PROFILES[size].speed * KNOTS_TO_GU_PER_SEC;
-    const bpPos = calcBaseTurnPoint(runway, speedGU);
-    const bp = renderer.gameToScreen(bpPos.x, bpPos.y);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(bp.sx - crossSize, bp.sy - crossSize);
-    ctx.lineTo(bp.sx + crossSize, bp.sy + crossSize);
-    ctx.moveTo(bp.sx + crossSize, bp.sy - crossSize);
-    ctx.lineTo(bp.sx - crossSize, bp.sy + crossSize);
-    ctx.stroke();
-    ctx.fillStyle = color;
-    ctx.font = '10px monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText('BP', bp.sx + crossSize + 3, bp.sy + 4);
-  }
 }

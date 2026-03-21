@@ -39,9 +39,6 @@ export function enterHolding(aircraft: Aircraft): void {
   aircraft.holdingSubState = HoldingSubState.OUTBOUND_TURN;
   aircraft.holdingTurnAccumulated = 0;
   aircraft.holdingTimer = 0;
-  // Snap to holding fix position
-  aircraft.x = HOLDING_FIX_X;
-  aircraft.y = HOLDING_FIX_Y;
 }
 
 /** Update an aircraft in holding pattern. */
@@ -57,8 +54,6 @@ export function updateHolding(aircraft: Aircraft, dt: number): void {
       aircraft.moveForward(dt);
       // Check if we've reached or passed the fix
       if (aircraft.x >= HOLDING_FIX_X) {
-        aircraft.x = HOLDING_FIX_X;
-        aircraft.y = HOLDING_FIX_Y;
         aircraft.holdingSubState = HoldingSubState.OUTBOUND_TURN;
         aircraft.holdingTurnAccumulated = 0;
       }

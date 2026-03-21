@@ -39,6 +39,7 @@ export const SPAWN_JITTER = 3;
 export const SPAWN_RAMP_FREQUENCY = 120; // seconds
 export const SPAWN_RAMP_AMOUNT = 5;
 export const SPAWN_INTERVAL_MIN = 10;
+export const MAX_QUEUE_SIZE = 9;
 
 // ── Flight mechanics ───────────────────────────────────
 export const TURN_RATE_DEG_PER_SEC = 20;

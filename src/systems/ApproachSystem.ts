@@ -16,40 +16,55 @@ function turnRadius(speedGU: number): number {
 }
 
 /**
- * Calculate the base turn point.
+ * Compute the turn center for a left turn onto the runway heading at FP.
  *
- * Geometry (for runway heading 0 / north):
- *
- *   Aircraft approaches from the holding fix (west/northwest).
- *   It makes a LEFT turn onto the runway heading.
- *
- *   Turn center C = FP offset to the LEFT of runway heading by radius R.
- *     For heading 0: left = west, so C = (FP.x - R, FP.y)
- *
- *   BP is on the OPPOSITE side of the turn circle from FP (directly
- *   west of C). This assumes the aircraft arrives heading ~180° (south)
- *   and sweeps a ~180° left turn through to heading 0° (north) at FP.
- *
- *     BP = C + left * R = FP + left * 2R
- *     For heading 0: BP = (FP.x - 2R, FP.y)
- *
- * Generalised for any runway heading H:
- *   Left direction: (-cos(H), -sin(H))
- *   C  = FP + left * R
- *   BP = C  + left * R  = FP + left * 2R
+ * The turn center is offset to the LEFT of the runway heading from FP.
+ * For heading 0 (north), left = west, so C = (FP.x - R, FP.y).
  */
-export function calcBaseTurnPoint(runway: Runway, speedGU: number): { x: number; y: number } {
-  const R = turnRadius(speedGU);
+function turnCenter(runway: Runway, R: number): { cx: number; cy: number } {
   const H = degToRad(runway.heading);
-
-  // Left direction from runway heading
-  const leftX = -Math.cos(H);
-  const leftY = -Math.sin(H);
-
-  // BP: 2R to the left of FP (opposite side of turn circle from FP)
   return {
-    x: FINAL_APPROACH_X + leftX * 2 * R,
-    y: FINAL_APPROACH_Y + leftY * 2 * R,
+    cx: FINAL_APPROACH_X + (-Math.cos(H)) * R,
+    cy: FINAL_APPROACH_Y + (-Math.sin(H)) * R,
+  };
+}
+
+/**
+ * Compute the tangent point from an external point P to the turn circle.
+ *
+ * Given circle (C, R) and external point P, finds the tangent point T
+ * on the circle that allows the aircraft to enter a left turn (CCW on
+ * screen) and sweep to FP with minimum turn.
+ *
+ * Returns the tangent point {x, y} or null if P is inside the circle.
+ */
+function tangentPoint(
+  px: number, py: number,
+  cx: number, cy: number,
+  R: number,
+): { x: number; y: number } | null {
+  const dx = px - cx;
+  const dy = py - cy;
+  const d = Math.sqrt(dx * dx + dy * dy);
+
+  if (d <= R) return null; // Inside circle — no tangent
+
+  // Angle from C to P
+  const beta = Math.atan2(dy, dx);
+
+  // Angle offset for tangent
+  const alpha = Math.acos(R / d);
+
+  // We want the tangent that gives the shorter left-turn sweep to FP.
+  // FP is at screen-angle H (runway heading in radians) from C.
+  // The left turn sweeps CCW on screen (screen-angle decreasing).
+  // We want the tangent at (beta - alpha) — this is closer to FP's
+  // angle, requiring less turn.
+  const theta = beta - alpha;
+
+  return {
+    x: cx + R * Math.cos(theta),
+    y: cy + R * Math.sin(theta),
   };
 }
 
@@ -68,16 +83,40 @@ export function updateApproach(aircraft: Aircraft, runway: Runway, dt: number): 
   if (aircraft.state !== AircraftState.APPROACH) return false;
 
   const speedGU = aircraft.profile.speed * KNOTS_TO_GU_PER_SEC;
-  const basePt = calcBaseTurnPoint(runway, speedGU);
+  const R = turnRadius(speedGU);
+  const C = turnCenter(runway, R);
   const turnAmount = TURN_RATE_DEG_PER_SEC * dt;
 
   switch (aircraft.approachSubState) {
     case ApproachSubState.DIRECT_TO_BASE: {
-      const dx = basePt.x - aircraft.x;
-      const dy = basePt.y - aircraft.y;
+      // Dynamically compute the tangent point from current position
+      const tp = tangentPoint(aircraft.x, aircraft.y, C.cx, C.cy, R);
+
+      if (!tp) {
+        // Inside the circle — steer directly toward FP
+        const dx = FINAL_APPROACH_X - aircraft.x;
+        const dy = FINAL_APPROACH_Y - aircraft.y;
+        const targetHeading = vectorToHeading(dx, dy);
+        const diff = angleDiffDeg(aircraft.heading, targetHeading);
+        if (Math.abs(diff) > turnAmount) {
+          aircraft.heading = wrapDeg(aircraft.heading + Math.sign(diff) * turnAmount);
+        } else {
+          aircraft.heading = targetHeading;
+        }
+        aircraft.moveForward(dt);
+        // Check if close to FP — transition to FINAL
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < speedGU * dt * 2) {
+          aircraft.approachSubState = ApproachSubState.FINAL;
+        }
+        break;
+      }
+
+      // Steer toward tangent point (rate-limited)
+      const dx = tp.x - aircraft.x;
+      const dy = tp.y - aircraft.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
-      // Steer toward base point (rate-limited)
       const targetHeading = vectorToHeading(dx, dy);
       const diff = angleDiffDeg(aircraft.heading, targetHeading);
       if (Math.abs(diff) > turnAmount) {
@@ -88,33 +127,21 @@ export function updateApproach(aircraft: Aircraft, runway: Runway, dt: number): 
 
       aircraft.moveForward(dt);
 
+      // Transition to ARC when reaching the tangent point
       if (dist < speedGU * dt * 2) {
         aircraft.approachSubState = ApproachSubState.BASE_TURN;
-        aircraft.approachTurnAccumulated = 0;
       }
       break;
     }
 
     case ApproachSubState.BASE_TURN: {
-      // Follow the arc of the turn circle by tracking the tangent heading.
-      //
-      // Turn center C = FP offset left of runway heading by R.
-      // At any point on/near the circle, the tangent heading for our
-      // left turn equals the screen-angle from C to the aircraft:
-      //   tangentHeading = atan2(dy, dx)  (in degrees)
-      //
-      // This works because for our left turn (CCW on screen),
-      // the tangent at screen-angle θ points in heading θ.
-      const R = turnRadius(speedGU);
-      const H = degToRad(runway.heading);
-      const cx = FINAL_APPROACH_X + (-Math.cos(H)) * R;
-      const cy = FINAL_APPROACH_Y + (-Math.sin(H)) * R;
-
-      const dx = aircraft.x - cx;
-      const dy = aircraft.y - cy;
+      // Follow the arc by tracking the tangent heading.
+      // The tangent heading at any point on/near the circle equals
+      // the screen-angle from C to the aircraft: atan2(dy, dx).
+      const dx = aircraft.x - C.cx;
+      const dy = aircraft.y - C.cy;
       const tangentHeading = wrapDeg(radToDeg(Math.atan2(dy, dx)));
 
-      // Steer toward the tangent heading (rate-limited)
       const diff = angleDiffDeg(aircraft.heading, tangentHeading);
       if (Math.abs(diff) > turnAmount) {
         aircraft.heading = wrapDeg(aircraft.heading + Math.sign(diff) * turnAmount);
@@ -124,17 +151,16 @@ export function updateApproach(aircraft: Aircraft, runway: Runway, dt: number): 
 
       aircraft.moveForward(dt);
 
-      // Transition to FINAL when heading is close to runway heading
+      // Transition to FINAL when heading is within 15° of runway heading
       const headingDiff = Math.abs(angleDiffDeg(aircraft.heading, runway.heading));
-      if (headingDiff < turnAmount * 2) {
-        aircraft.heading = runway.heading;
+      if (headingDiff < 15) {
         aircraft.approachSubState = ApproachSubState.FINAL;
       }
       break;
     }
 
     case ApproachSubState.FINAL: {
-      // Steer toward the runway threshold (self-corrects any offset from the turn)
+      // Steer toward the runway threshold
       const dx = runway.thresholdX - aircraft.x;
       const dy = runway.thresholdY - aircraft.y;
       const distToThreshold = Math.sqrt(dx * dx + dy * dy);

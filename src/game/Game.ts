@@ -1,5 +1,5 @@
 import { GameStateEnum, AircraftState } from '../types';
-import { WIN_TARGET, WORLD_WIDTH, WORLD_HEIGHT } from '../config';
+import { WIN_TARGET, WORLD_WIDTH, WORLD_HEIGHT, MAX_QUEUE_SIZE } from '../config';
 import { Clock } from './Clock';
 import { Renderer } from '../render/Renderer';
 import { Aircraft } from '../entities/Aircraft';
@@ -111,10 +111,12 @@ export class Game {
     // Weather
     this.weatherSystem.update(dt, this.runway);
 
-    // Spawn
-    const newAircraft = this.spawnSystem.update(dt, elapsed);
-    if (newAircraft) {
-      this.aircraft.push(newAircraft);
+    // Spawn (only if queue is below max size)
+    if (this.queueSystem.length < MAX_QUEUE_SIZE) {
+      const newAircraft = this.spawnSystem.update(dt, elapsed);
+      if (newAircraft) {
+        this.aircraft.push(newAircraft);
+      }
     }
 
     // Update each aircraft
