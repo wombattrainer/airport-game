@@ -75,7 +75,7 @@ export function drawRunway(renderer: Renderer, runway: Runway): void {
   ctx.fillStyle = '#00cccc';
   ctx.font = '10px monospace';
   ctx.textAlign = 'left';
-  ctx.fillText('HF', hf.sx + crossSize + 3, hf.sy + 4);
+  ctx.fillText('Holding Point', hf.sx + crossSize + 3, hf.sy + 4);
 
   // Debug: Final Approach Point marker
   const fp = renderer.gameToScreen(FINAL_APPROACH_X, FINAL_APPROACH_Y);
@@ -90,5 +90,5 @@ export function drawRunway(renderer: Renderer, runway: Runway): void {
   ctx.fillStyle = '#ff00ff';
   ctx.font = '10px monospace';
   ctx.textAlign = 'left';
-  ctx.fillText('FP', fp.sx + crossSize + 3, fp.sy + 4);
+  ctx.fillText('Final Approach', fp.sx + crossSize + 3, fp.sy + 4);
 }

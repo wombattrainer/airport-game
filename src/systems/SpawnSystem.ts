@@ -10,6 +10,7 @@ import { vectorToHeading } from '../math/MathUtils';
 export class SpawnSystem {
   private timer = 0;
   private nextInterval = 0;
+  private spawnCount = 0;
 
   constructor() {
     this.nextInterval = this.computeInterval(0);
@@ -18,6 +19,7 @@ export class SpawnSystem {
   reset(): void {
     this.timer = 0;
     this.nextInterval = 0; // Spawn first aircraft immediately
+    this.spawnCount = 0;
   }
 
   /** Returns a new Aircraft if it's time to spawn, else null. */
@@ -26,7 +28,9 @@ export class SpawnSystem {
     if (this.timer < this.nextInterval) return null;
 
     this.timer = 0;
-    this.nextInterval = this.computeInterval(elapsedTime);
+    this.spawnCount++;
+    // Second aircraft spawns quickly, then normal schedule resumes
+    this.nextInterval = this.spawnCount === 1 ? 5 : this.computeInterval(elapsedTime);
 
     const size = randomAircraftSize();
     const callsign = generateCallsign();
