@@ -14,6 +14,10 @@ export enum AircraftState {
 }
 
 export enum HoldingSubState {
+  ENTRY_ALIGN = 'ENTRY_ALIGN',
+  ENTRY_TURN1 = 'ENTRY_TURN1',
+  ENTRY_LEG = 'ENTRY_LEG',
+  ENTRY_TURN2 = 'ENTRY_TURN2',
   INBOUND_TURN = 'INBOUND_TURN',
   INBOUND_LEG = 'INBOUND_LEG',
   OUTBOUND_TURN = 'OUTBOUND_TURN',

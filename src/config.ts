@@ -42,7 +42,8 @@ export const SPAWN_INTERVAL_MIN = 10;
 export const MAX_QUEUE_SIZE = 9;
 
 // ── Flight mechanics ───────────────────────────────────
-export const TURN_RATE_DEG_PER_SEC = 20;
+export const TURN_RATE_DEG_PER_SEC = 30;
+export const HOLDING_DIRECTION = 90; // degrees, compass heading of inbound leg toward HF
 export const HOLDING_OUTBOUND_DURATION = 5; // seconds
 
 // ── Landing ────────────────────────────────────────────

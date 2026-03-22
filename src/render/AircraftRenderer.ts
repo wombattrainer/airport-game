@@ -47,15 +47,19 @@ export function drawAircraft(renderer: Renderer, aircraft: Aircraft): void {
   ctx.textAlign = 'center';
   ctx.fillText(aircraft.callsign, pos.sx, pos.sy - triSize - 4);
 
-  // Fuel warning indicator for holding aircraft
+  // Holding sub-state debug label + fuel warning
   if (aircraft.state === AircraftState.HOLDING) {
+    ctx.fillStyle = '#aaaaaa';
+    ctx.font = '9px monospace';
+    ctx.fillText(aircraft.holdingSubState, pos.sx, pos.sy + triSize + 12);
+
     const fuelSec = aircraft.fuelEndurance;
     if (fuelSec <= 30) {
       ctx.fillStyle = '#ff4444';
-      ctx.fillText(`${Math.ceil(fuelSec)}s`, pos.sx, pos.sy + triSize + 12);
+      ctx.fillText(`${Math.ceil(fuelSec)}s`, pos.sx, pos.sy + triSize + 22);
     } else if (fuelSec <= 60) {
       ctx.fillStyle = '#ffcc00';
-      ctx.fillText(`${Math.ceil(fuelSec)}s`, pos.sx, pos.sy + triSize + 12);
+      ctx.fillText(`${Math.ceil(fuelSec)}s`, pos.sx, pos.sy + triSize + 22);
     }
   }
 }
