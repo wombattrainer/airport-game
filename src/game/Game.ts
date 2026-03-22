@@ -67,12 +67,14 @@ export class Game {
         return;
       }
 
-      // Cleared to Land buttons
-      for (const area of this.ctlHitAreas) {
-        if (mx >= area.x && mx <= area.x + area.width &&
-            my >= area.y && my <= area.y + area.height) {
-          this.clearAircraftToLand(area.callsign);
-          return;
+      // Cleared to Land buttons (disabled during weather)
+      if (!this.weatherSystem.isStormActive) {
+        for (const area of this.ctlHitAreas) {
+          if (mx >= area.x && mx <= area.x + area.width &&
+              my >= area.y && my <= area.y + area.height) {
+            this.clearAircraftToLand(area.callsign);
+            return;
+          }
         }
       }
     }
@@ -87,7 +89,7 @@ export class Game {
   private clearAircraftToLand(callsign: string): void {
     const ac = this.queueSystem.remove(callsign);
     if (ac) {
-      beginApproach(ac, this.runway, false); // user-initiated: don't lock runway
+      beginApproach(ac, this.runway);
     }
   }
 
@@ -174,7 +176,6 @@ export class Game {
           const stopped = updateLanding(ac, this.runway, dt);
           if (stopped) {
             this.airport.earn(ac.value);
-            this.handleRunwayFreed();
           }
           break;
         }
@@ -195,11 +196,6 @@ export class Game {
         this.explosions.push(createExplosion(col.wx, col.wy));
         collidedCallsigns.add(col.a.callsign);
         collidedCallsigns.add(col.b.callsign);
-      }
-      // Free the runway if the aircraft holding the lock collided.
-      if (this.runway.isLocked && this.runway.lockedBy !== null &&
-          collidedCallsigns.has(this.runway.lockedBy)) {
-        this.handleRunwayFreed();
       }
       this.aircraft = this.aircraft.filter(ac => !collidedCallsigns.has(ac.callsign));
     }
@@ -233,22 +229,18 @@ export class Game {
     }
   }
 
-  private handleRunwayFreed(): void {
-    // After a landing completes, check if weather should keep it locked
-    if (this.weatherSystem.isStormActive) {
-      this.runway.lock('weather');
-    } else {
-      this.runway.unlock();
-    }
-  }
-
   private tryReleaseQueue(): void {
-    if (this.runway.isLocked) return;
+    if (this.weatherSystem.isStormActive) return;
     if (this.queueSystem.length === 0) return;
+
+    const approachOrLanding = this.aircraft.some(
+      ac => ac.state === AircraftState.APPROACH || ac.state === AircraftState.LANDING,
+    );
+    if (approachOrLanding) return;
 
     const next = this.queueSystem.dequeue();
     if (next) {
-      beginApproach(next, this.runway); // auto-release: locks runway
+      beginApproach(next, this.runway);
     }
   }
 
@@ -289,6 +281,7 @@ export class Game {
       activeAircraft,
       this.dragDrop.dragIndex,
       this.dragDrop.dragY,
+      this.weatherSystem.isStormActive,
     );
     this.dragDrop.updateHitAreas(dragAreas);
     this.ctlHitAreas = ctlAreas;

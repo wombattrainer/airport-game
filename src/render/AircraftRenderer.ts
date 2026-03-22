@@ -187,19 +187,26 @@ export function drawAircraft(renderer: Renderer, aircraft: Aircraft): void {
   ctx.textAlign = 'center';
   ctx.fillText(aircraft.callsign, pos.sx, pos.sy - triSize - 4);
 
-  // Holding sub-state debug label + fuel warning
-  if (aircraft.state === AircraftState.HOLDING) {
-    ctx.fillStyle = '#aaaaaa';
-    ctx.font = '9px monospace';
-    ctx.fillText(aircraft.holdingSubState, pos.sx, pos.sy + triSize + 12);
+  // Holding sub-state debug label (disabled — re-enable when tuning holding entry)
+  // if (aircraft.state === AircraftState.HOLDING) {
+  //   ctx.fillStyle = '#aaaaaa';
+  //   ctx.font = '9px monospace';
+  //   ctx.fillText(aircraft.holdingSubState, pos.sx, pos.sy + triSize + 12);
+  // }
 
+  // Fuel warning on holding aircraft
+  if (aircraft.state === AircraftState.HOLDING) {
     const fuelSec = aircraft.fuelEndurance;
     if (fuelSec <= 30) {
       ctx.fillStyle = '#ff4444';
-      ctx.fillText(`${Math.ceil(fuelSec)}s`, pos.sx, pos.sy + triSize + 22);
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${Math.ceil(fuelSec)}s`, pos.sx, pos.sy + triSize + 12);
     } else if (fuelSec <= 60) {
       ctx.fillStyle = '#ffcc00';
-      ctx.fillText(`${Math.ceil(fuelSec)}s`, pos.sx, pos.sy + triSize + 22);
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${Math.ceil(fuelSec)}s`, pos.sx, pos.sy + triSize + 12);
     }
   }
 }

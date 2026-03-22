@@ -40,12 +40,7 @@ export class WeatherSystem {
         this.isStormActive = true;
         this.stormDuration = 0;
 
-        // Lock runway if not already locked by an aircraft
-        if (!runway.isLocked) {
-          runway.lock('weather');
-        }
-        // If locked by aircraft, weather waits — runway stays locked by aircraft.
-        // When aircraft finishes, Game will check weather and re-lock if storm still active.
+        runway.lock('weather');
       }
     }
   }

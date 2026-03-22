@@ -35,6 +35,7 @@ export function drawQueuePanel(
   activeAircraft: Aircraft[],
   dragIndex: number | null,
   dragY: number | null,
+  weatherLocked = false,
 ): QueuePanelResult {
   const { ctx } = renderer;
   const panelX = renderer.queuePanelX;
@@ -70,11 +71,12 @@ export function drawQueuePanel(
     const aircraft = queueSystem.queue[i];
     const isDragging = dragIndex === i;
 
+    const baseCardY = nextY + i * (CARD_HEIGHT + CARD_MARGIN);
     let cardY: number;
     if (isDragging && dragY !== null) {
       cardY = dragY - CARD_HEIGHT / 2;
     } else {
-      cardY = nextY + i * (CARD_HEIGHT + CARD_MARGIN);
+      cardY = baseCardY;
     }
 
     // Card background color based on fuel
@@ -115,21 +117,33 @@ export function drawQueuePanel(
     ctx.fillText(`#${i + 1}`, cardX + CARD_PADDING, cardY + 14);
 
     // Cleared to Land button (top-right of card)
-    const btnW = 46;
+    const btnW = 96;
     const btnH = 18;
     const btnX = cardX + cardW - CARD_PADDING - btnW;
     const btnY = cardY + 4;
-    ctx.fillStyle = '#1a3a1a';
-    ctx.fillRect(btnX, btnY, btnW, btnH);
-    ctx.strokeStyle = '#44cc44';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(btnX, btnY, btnW, btnH);
-    ctx.fillStyle = '#44cc44';
-    ctx.font = 'bold 9px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('→ LAND', btnX + btnW / 2, btnY + 12);
-
-    ctlAreas.push({ callsign: aircraft.callsign, x: btnX, y: btnY, width: btnW, height: btnH });
+    if (weatherLocked) {
+      ctx.fillStyle = '#2a2a2a';
+      ctx.fillRect(btnX, btnY, btnW, btnH);
+      ctx.strokeStyle = '#555';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(btnX, btnY, btnW, btnH);
+      ctx.fillStyle = '#555';
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('→ Clear to Land', btnX + btnW / 2, btnY + 12);
+    } else {
+      ctx.fillStyle = '#1a3a1a';
+      ctx.fillRect(btnX, btnY, btnW, btnH);
+      ctx.strokeStyle = '#44cc44';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(btnX, btnY, btnW, btnH);
+      ctx.fillStyle = '#44cc44';
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('→ Clear to Land', btnX + btnW / 2, btnY + 12);
+      const hitBtnY = baseCardY + 4; // use non-dragged position for hit detection
+      ctlAreas.push({ callsign: aircraft.callsign, x: btnX, y: hitBtnY, width: btnW, height: btnH });
+    }
 
     // Callsign
     ctx.fillStyle = '#ffffff';
@@ -179,7 +193,7 @@ function drawActiveCard(
   cardW: number,
 ): void {
   const isLanding = aircraft.state === AircraftState.LANDING;
-  const label = isLanding ? 'LANDING' : 'APPROACH';
+  const label = isLanding ? 'LANDING' : 'ON APPROACH';
   const accentColor = isLanding ? '#44cc44' : '#4488ff';
 
   // Card background
