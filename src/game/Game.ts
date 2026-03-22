@@ -299,6 +299,26 @@ export class Game {
 
     this.pauseButtonRect = { x: btnX, y: btnY, w: btnW, h: btnH };
 
+    // Instructions text above pause button
+    const instrX = btnX + 4;
+    const instrLines = [
+      'Instructions:',
+      'Earn $ when planes land.',
+      'Lose $ when planes crash',
+      'or divert. Starts slow,',
+      'gets busier. Planes on',
+      'approach (yellow diamond)',
+      'can crash into each other.',
+    ];
+    const lineH = 13;
+    const instrStartY = btnY - instrLines.length * lineH - 8;
+    ctx.fillStyle = '#666';
+    ctx.font = '15px monospace';
+    ctx.textAlign = 'left';
+    for (let i = 0; i < instrLines.length; i++) {
+      ctx.fillText(instrLines[i], instrX, instrStartY + i * lineH);
+    }
+
     ctx.fillStyle = this.paused ? '#2a5a2a' : '#2a2a4a';
     ctx.fillRect(btnX, btnY, btnW, btnH);
     ctx.strokeStyle = this.paused ? '#44cc44' : '#666';
