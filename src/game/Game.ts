@@ -15,7 +15,7 @@ import { updateFuel, beginDivert } from '../systems/FuelSystem';
 import { drawRunway } from '../render/RunwayRenderer';
 import { drawAircraft } from '../render/AircraftRenderer';
 import { drawHud } from '../render/HudRenderer';
-import { drawQueuePanel } from '../render/QueuePanelRenderer';
+import { drawQueuePanel, ClearedToLandHitArea } from '../render/QueuePanelRenderer';
 import { DragDropManager } from '../input/DragDropManager';
 
 export class Game {
@@ -30,9 +30,9 @@ export class Game {
   private weatherSystem: WeatherSystem;
   private dragDrop: DragDropManager;
   private gameOverReason: 'win' | 'bankrupt' = 'win';
-  private activeAircraft: Aircraft | null = null;
   private paused = false;
   private pauseButtonRect = { x: 0, y: 0, w: 0, h: 0 };
+  private ctlHitAreas: ClearedToLandHitArea[] = [];
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new Renderer(canvas);
@@ -56,10 +56,21 @@ export class Game {
       const rect = this.renderer.canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
+
+      // Pause button
       const b = this.pauseButtonRect;
       if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
         this.paused = !this.paused;
         return;
+      }
+
+      // Cleared to Land buttons
+      for (const area of this.ctlHitAreas) {
+        if (mx >= area.x && mx <= area.x + area.width &&
+            my >= area.y && my <= area.y + area.height) {
+          this.clearAircraftToLand(area.callsign);
+          return;
+        }
       }
     }
 
@@ -67,6 +78,13 @@ export class Game {
       this.startGame();
     } else if (this.state === GameStateEnum.GAME_OVER) {
       this.state = GameStateEnum.MENU;
+    }
+  }
+
+  private clearAircraftToLand(callsign: string): void {
+    const ac = this.queueSystem.remove(callsign);
+    if (ac) {
+      beginApproach(ac, this.runway, false); // user-initiated: don't lock runway
     }
   }
 
@@ -79,7 +97,7 @@ export class Game {
     this.queueSystem.reset();
     this.weatherSystem.reset();
     this.dragDrop.reset();
-    this.activeAircraft = null;
+    this.ctlHitAreas = [];
     this.paused = false;
     this.clock.reset();
   }
@@ -152,7 +170,6 @@ export class Game {
           const stopped = updateLanding(ac, this.runway, dt);
           if (stopped) {
             this.airport.earn(ac.value);
-            this.activeAircraft = null;
             this.handleRunwayFreed();
           }
           break;
@@ -202,8 +219,7 @@ export class Game {
 
     const next = this.queueSystem.dequeue();
     if (next) {
-      beginApproach(next, this.runway);
-      this.activeAircraft = next;
+      beginApproach(next, this.runway); // auto-release: locks runway
     }
   }
 
@@ -231,14 +247,18 @@ export class Game {
       this.clock.elapsed,
     );
 
-    const hitAreas = drawQueuePanel(
+    const activeAircraft = this.aircraft.filter(
+      ac => ac.state === AircraftState.APPROACH || ac.state === AircraftState.LANDING,
+    );
+    const { dragAreas, ctlAreas } = drawQueuePanel(
       this.renderer,
       this.queueSystem,
-      this.activeAircraft,
+      activeAircraft,
       this.dragDrop.dragIndex,
       this.dragDrop.dragY,
     );
-    this.dragDrop.updateHitAreas(hitAreas);
+    this.dragDrop.updateHitAreas(dragAreas);
+    this.ctlHitAreas = ctlAreas;
 
     // Pause button at bottom of queue panel
     this.drawPauseButton();

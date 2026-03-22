@@ -15,18 +15,32 @@ export interface QueueCardHitArea {
   height: number;
 }
 
-/** Draw the queue panel. Returns hit areas for drag-and-drop (queue cards only). */
+export interface ClearedToLandHitArea {
+  callsign: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface QueuePanelResult {
+  dragAreas: QueueCardHitArea[];
+  ctlAreas: ClearedToLandHitArea[];
+}
+
+/** Draw the queue panel. Returns drag hit areas and cleared-to-land button hit areas. */
 export function drawQueuePanel(
   renderer: Renderer,
   queueSystem: QueueSystem,
-  activeAircraft: Aircraft | null,
+  activeAircraft: Aircraft[],
   dragIndex: number | null,
   dragY: number | null,
-): QueueCardHitArea[] {
+): QueuePanelResult {
   const { ctx } = renderer;
   const panelX = renderer.queuePanelX;
   const panelW = renderer.queuePanelWidth;
-  const hitAreas: QueueCardHitArea[] = [];
+  const dragAreas: QueueCardHitArea[] = [];
+  const ctlAreas: ClearedToLandHitArea[] = [];
   const cardW = panelW - CARD_MARGIN * 2;
   const cardX = panelX + CARD_MARGIN;
 
@@ -42,13 +56,16 @@ export function drawQueuePanel(
 
   let nextY = 56;
 
-  // Active aircraft card (approach / landing) — not draggable
-  if (activeAircraft) {
-    drawActiveCard(ctx, activeAircraft, cardX, nextY, cardW);
-    nextY += CARD_HEIGHT + CARD_MARGIN + 4; // extra gap to separate from queue
+  // Active aircraft cards (approach / landing) — not draggable, one per aircraft
+  for (const aircraft of activeAircraft) {
+    drawActiveCard(ctx, aircraft, cardX, nextY, cardW);
+    nextY += CARD_HEIGHT + CARD_MARGIN;
+  }
+  if (activeAircraft.length > 0) {
+    nextY += 4; // extra gap to separate from queue
   }
 
-  // Queue cards (draggable)
+  // Queue cards (draggable, with CTL button)
   for (let i = 0; i < queueSystem.queue.length; i++) {
     const aircraft = queueSystem.queue[i];
     const isDragging = dragIndex === i;
@@ -97,9 +114,27 @@ export function drawQueuePanel(
     ctx.textAlign = 'left';
     ctx.fillText(`#${i + 1}`, cardX + CARD_PADDING, cardY + 14);
 
+    // Cleared to Land button (top-right of card)
+    const btnW = 46;
+    const btnH = 18;
+    const btnX = cardX + cardW - CARD_PADDING - btnW;
+    const btnY = cardY + 4;
+    ctx.fillStyle = '#1a3a1a';
+    ctx.fillRect(btnX, btnY, btnW, btnH);
+    ctx.strokeStyle = '#44cc44';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(btnX, btnY, btnW, btnH);
+    ctx.fillStyle = '#44cc44';
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('→ LAND', btnX + btnW / 2, btnY + 12);
+
+    ctlAreas.push({ callsign: aircraft.callsign, x: btnX, y: btnY, width: btnW, height: btnH });
+
     // Callsign
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'left';
     ctx.fillText(aircraft.callsign, cardX + CARD_PADDING, cardY + 32);
 
     // Size indicator
@@ -124,7 +159,7 @@ export function drawQueuePanel(
 
     ctx.globalAlpha = 1;
 
-    hitAreas.push({
+    dragAreas.push({
       index: i,
       x: cardX,
       y: nextY + i * (CARD_HEIGHT + CARD_MARGIN),
@@ -133,7 +168,7 @@ export function drawQueuePanel(
     });
   }
 
-  return hitAreas;
+  return { dragAreas, ctlAreas };
 }
 
 function drawActiveCard(

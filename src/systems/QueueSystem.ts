@@ -12,10 +12,14 @@ export class QueueSystem {
     return this.queue.shift() ?? null;
   }
 
-  /** Remove a specific aircraft (e.g. on divert). */
-  remove(callsign: string): void {
+  /** Remove a specific aircraft by callsign. Returns the removed aircraft or null. */
+  remove(callsign: string): Aircraft | null {
     const idx = this.queue.findIndex(a => a.callsign === callsign);
-    if (idx !== -1) this.queue.splice(idx, 1);
+    if (idx !== -1) {
+      const [removed] = this.queue.splice(idx, 1);
+      return removed;
+    }
+    return null;
   }
 
   /** Move an aircraft from one position to another. */

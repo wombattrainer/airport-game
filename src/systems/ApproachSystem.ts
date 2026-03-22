@@ -68,14 +68,16 @@ function tangentPoint(
   };
 }
 
-/** Initiate approach for an aircraft. */
-export function beginApproach(aircraft: Aircraft, runway: Runway): void {
+/** Initiate approach for an aircraft. Pass lockRunway=false for user-initiated approaches. */
+export function beginApproach(aircraft: Aircraft, runway: Runway, lockRunway = true): void {
   aircraft.state = AircraftState.APPROACH;
   aircraft.approachSubState = ApproachSubState.DIRECT_TO_BASE;
   aircraft.approachTurnAccumulated = 0;
   aircraft.approachTargetHeading = runway.heading;
 
-  runway.lock(aircraft.callsign);
+  if (lockRunway) {
+    runway.lock(aircraft.callsign);
+  }
 }
 
 /** Update an aircraft on approach. Returns true when aircraft reaches the threshold. */
