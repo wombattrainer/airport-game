@@ -165,6 +165,22 @@ export function drawAircraft(renderer: Renderer, aircraft: Aircraft): void {
 
   ctx.restore();
 
+  // Approach indicator: yellow diamond outline
+  if (aircraft.state === AircraftState.APPROACH) {
+    const r = 18 * s;
+    ctx.save();
+    ctx.strokeStyle = '#ffdd00';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(pos.sx,     pos.sy - r);
+    ctx.lineTo(pos.sx + r, pos.sy);
+    ctx.lineTo(pos.sx,     pos.sy + r);
+    ctx.lineTo(pos.sx - r, pos.sy);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // Callsign label
   ctx.fillStyle = '#ffffff';
   ctx.font = '10px monospace';
