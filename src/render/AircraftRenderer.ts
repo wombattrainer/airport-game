@@ -23,6 +23,22 @@ export function drawAircraft(renderer: Renderer, aircraft: Aircraft): void {
   const s = SIZE_SCALE[aircraft.size];
   const triSize = 10 * s;
 
+  // Trail dots (oldest first, fading opacity and shrinking size)
+  const color = SIZE_COLORS[aircraft.size];
+  for (let i = 0; i < aircraft.trail.length; i++) {
+    const t = aircraft.trail[i];
+    const tp = renderer.gameToScreen(t.x, t.y);
+    const age = aircraft.trail.length - i; // 3=oldest, 1=newest
+    const alpha = (4 - age) * 0.25; // 0.25, 0.50, 0.75
+    const radius = 2 * s * (4 - age) / 3;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(tp.sx, tp.sy, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
   ctx.save();
   ctx.translate(pos.sx, pos.sy);
   ctx.rotate(degToRad(aircraft.heading));

@@ -24,6 +24,12 @@ export class Aircraft {
   holdingTimer = 0;
   holdingTurnAccumulated = 0;
 
+  // Trail (recent positions for visual feedback)
+  trail: { x: number; y: number }[] = [];
+  private trailTimer = 0;
+  private static readonly TRAIL_INTERVAL = 0.4; // seconds between samples
+  private static readonly TRAIL_MAX = 3;
+
   // Approach sub-state
   approachSubState: ApproachSubState = ApproachSubState.DIRECT_TO_BASE;
   approachTurnAccumulated = 0;
@@ -44,6 +50,16 @@ export class Aircraft {
 
   /** Move forward along current heading. */
   moveForward(dt: number): void {
+    // Record trail position at regular intervals
+    this.trailTimer += dt;
+    if (this.trailTimer >= Aircraft.TRAIL_INTERVAL) {
+      this.trailTimer = 0;
+      this.trail.push({ x: this.x, y: this.y });
+      if (this.trail.length > Aircraft.TRAIL_MAX) {
+        this.trail.shift();
+      }
+    }
+
     const dir = headingToVector(this.heading);
     this.x += dir.x * this.speed * dt;
     this.y += dir.y * this.speed * dt;
