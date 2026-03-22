@@ -16,6 +16,8 @@ import { drawRunway } from '../render/RunwayRenderer';
 import { drawAircraft } from '../render/AircraftRenderer';
 import { drawHud } from '../render/HudRenderer';
 import { drawQueuePanel, ClearedToLandHitArea } from '../render/QueuePanelRenderer';
+import { drawExplosion, createExplosion, Explosion } from '../render/ExplosionRenderer';
+import { checkCollisions } from '../systems/CollisionSystem';
 import { DragDropManager } from '../input/DragDropManager';
 
 export class Game {
@@ -33,6 +35,7 @@ export class Game {
   private paused = false;
   private pauseButtonRect = { x: 0, y: 0, w: 0, h: 0 };
   private ctlHitAreas: ClearedToLandHitArea[] = [];
+  private explosions: Explosion[] = [];
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new Renderer(canvas);
@@ -98,6 +101,7 @@ export class Game {
     this.weatherSystem.reset();
     this.dragDrop.reset();
     this.ctlHitAreas = [];
+    this.explosions = [];
     this.paused = false;
     this.clock.reset();
   }
@@ -181,6 +185,31 @@ export class Game {
       }
     }
 
+    // Collision detection (APPROACH / LANDING aircraft only)
+    const collisions = checkCollisions(this.aircraft, this.renderer);
+    if (collisions.length > 0) {
+      const collidedCallsigns = new Set<string>();
+      for (const col of collisions) {
+        this.airport.deduct(col.a.value);
+        this.airport.deduct(col.b.value);
+        this.explosions.push(createExplosion(col.wx, col.wy));
+        collidedCallsigns.add(col.a.callsign);
+        collidedCallsigns.add(col.b.callsign);
+      }
+      // Free the runway if the aircraft holding the lock collided.
+      if (this.runway.isLocked && this.runway.lockedBy !== null &&
+          collidedCallsigns.has(this.runway.lockedBy)) {
+        this.handleRunwayFreed();
+      }
+      this.aircraft = this.aircraft.filter(ac => !collidedCallsigns.has(ac.callsign));
+    }
+
+    // Age out finished explosions
+    this.explosions = this.explosions.filter(ex => {
+      ex.age += dt;
+      return ex.age < ex.maxAge;
+    });
+
     // Release top of queue if runway is free
     this.tryReleaseQueue();
 
@@ -237,6 +266,10 @@ export class Game {
 
     for (const ac of this.aircraft) {
       drawAircraft(this.renderer, ac);
+    }
+
+    for (const ex of this.explosions) {
+      drawExplosion(this.renderer, ex);
     }
 
     drawHud(
