@@ -9,7 +9,7 @@
 | Version | Date | Change |
 |---------|------|--------|
 | 1.0 | March 2026 | Initial prototype specification |
-| 1.1 | March 2026 | Added aircraft approach state visual indicator (Section 7.4) |
+| 1.1 | March 2026 | Corrected turn rate (3°/sec → 30°/sec); corrected spawn start interval (40s → 20s); confirmed runway dimensions (600 × 30 units); documented holding direct entry procedure (Section 3.2); documented approach sub-states (Section 3.3); added Cleared to Land player mechanic and simultaneous approach rules (Section 4); added collision detection system (Section 6); added Difficulty Scaling as Section 7 (renumbered); updated queue panel to describe active aircraft cards (Section 8.1); added approach state indicator (Section 8.4); added aircraft visual styles (Section 8.5); added flight path trail dots (Section 8.6) |
 
 Top-down airport landing simulator. Manage arrivals, queues, and weather to build your airport balance from $10,000 to $500,000.
 
@@ -98,15 +98,15 @@ Each aircraft progresses through a sequence of states. The transition depends on
 ### Happy Path (runway free, no queue)
 
 1. **ARRIVING:** Aircraft spawns bottom-left of screen, flying toward airport centre point.
-2. **APPROACH:** Aircraft flies direct to dynamically calculated base turn point, executes 3°/sec turn onto runway heading, crosses the final approach point aligned with runway.
+2. **APPROACH:** Aircraft progresses through three sub-states — DIRECT_TO_BASE (flies toward dynamically calculated tangent point), BASE_TURN (follows circular arc at 30°/sec onto runway heading), and FINAL (straight flight to runway threshold).
 3. **LANDING:** Aircraft touches down on runway, decelerates to stop at 75% runway length.
 4. **LANDED:** Aircraft removed from game space. Value added to bank balance. Runway unlocked.
 
 ### Queue Path (runway locked)
 
 1. **ARRIVING:** Aircraft spawns bottom-left of screen, flying toward airport centre point.
-2. **HOLDING:** Aircraft routes to holding fix and enters racetrack holding pattern. Fuel timer counts down. Aircraft is placed in queue.
-3. **APPROACH:** When released from queue (runway unlocks, aircraft is top of queue), aircraft flies from current position direct to base turn point, then turns onto final approach.
+2. **HOLDING:** Aircraft routes to holding fix, executes a direct entry procedure, and enters racetrack holding pattern. Fuel timer counts down. Aircraft is placed in queue.
+3. **APPROACH:** When released from queue — either automatically when the runway unlocks, or manually by the player via the Cleared to Land button — the aircraft proceeds through the DIRECT_TO_BASE, BASE_TURN, and FINAL sub-states as above.
 4. **LANDING:** As above.
 5. **LANDED:** As above.
 
@@ -124,13 +124,26 @@ The holding pattern follows real-world aviation conventions for a standard racet
 
 | Component | Specification |
 |-----------|---------------|
-| Holding Fix | Fixed x,y position in game space. All aircraft fly over this point. |
-| Inbound Leg | Straight flight path toward the holding fix, direction left to right. |
-| Outbound Leg | Straight flight path away from the holding fix, direction right to left. Duration: 5 seconds. |
-| Turns | Standard rate turns at 3° per second, always to the right. |
-| Turn Duration | 180° ÷ 3°/sec = 60 seconds per turn. |
+| Holding Fix | Fixed position in game space at (1000, 800). All aircraft fly over this point. |
+| Inbound Leg | Straight flight path toward the holding fix, heading 90° (east). |
+| Outbound Leg | Straight flight path away from the holding fix, heading 270° (west). Duration: 5 seconds. |
+| Turns | Right-hand turns at 30°/sec. |
+| Turn Duration | 180° ÷ 30°/sec = 6 seconds per turn. |
 | Speed Effect | All aircraft share the same holding fix and turn rate. Faster aircraft produce a larger racetrack footprint because they cover more distance per second during both straight legs and turns. |
-| Vertical Stacking | Multiple aircraft may hold over the same fix simultaneously. Visual differentiation is needed (see Section 7). |
+| Vertical Stacking | Multiple aircraft may hold over the same fix simultaneously. Visual differentiation is needed (see Section 8). |
+
+### Entry Procedure
+
+Aircraft entering the holding pattern from their arrival heading (~22° from the spawn point) follow a four-phase direct entry procedure before joining the steady-state racetrack.
+
+| Phase | Sub-state | Behaviour |
+|-------|-----------|-----------|
+| 1 | ENTRY_ALIGN | Aircraft turns via the shortest arc to align with the inbound heading (90°). Forward movement continues during the turn. |
+| 2 | ENTRY_TURN1 | Aircraft executes a 90° right turn. |
+| 3 | ENTRY_LEG | Aircraft flies straight until its perpendicular displacement from the inbound track equals the turn radius for that aircraft's speed. |
+| 4 | ENTRY_TURN2 | Aircraft executes a second 90° right turn, arriving on the outbound heading (270°) and joining the racetrack at the outbound leg. |
+
+Note: The current entry procedure is optimised for arrivals from the south-west at approximately 22°. Teardrop and parallel entry procedures for other arrival headings are not yet implemented.
 
 ## 3.3 Approach Path Geometry
 
@@ -140,20 +153,23 @@ When an aircraft is released to land (either from the queue or on direct arrival
 
 **Final Approach Point:** A fixed x,y position on the extended runway centreline. This is where the aircraft must be aligned with the runway heading. This point is the same for all aircraft regardless of size or speed.
 
-**Base Turn Point:** Not a fixed position. It is dynamically calculated for each aircraft based on its speed. The base turn point is the position where, if the aircraft begins a 3°/sec turn, it will roll out on the runway heading exactly as it crosses the final approach point.
+**Base Turn Point (Tangent Point):** Not a fixed position. It is dynamically calculated for each aircraft based on its current position and speed. The algorithm solves for the point on the turn circle tangent from the aircraft's current position, so that beginning the turn at that point results in the aircraft rolling out on the runway heading exactly as it crosses the final approach point.
 
 **Speed Effect on Path:** A slower aircraft has a tighter turn radius, so its base turn point is closer to the final approach point and the approach arc is compact. A faster aircraft has a wider turn radius, so its base turn point is further from the final approach point and the approach arc sweeps wider. This is visually distinctive and gives the player intuitive speed feedback.
 
-### Approach Sequence
+### Approach Sub-States
 
-1. Aircraft flies in a straight line from its current position toward the calculated base turn point.
-2. At the base turn point, aircraft begins a 3°/sec turn toward the runway heading.
-3. Turn completes as aircraft crosses the final approach point, now aligned with runway centreline.
-4. Aircraft continues straight along runway centreline to threshold and touchdown.
+The APPROACH state is divided into three sequential sub-states:
+
+| Sub-state | Behaviour |
+|-----------|-----------|
+| DIRECT_TO_BASE | Aircraft flies a straight course toward the dynamically calculated tangent point. Heading adjustments are rate-limited to 30°/sec. If the aircraft is already inside the turn circle, it steers directly toward the final approach point instead. |
+| BASE_TURN | Aircraft follows the circular arc by tracking the tangent heading at its current position on the turn circle. Rate-limited to 30°/sec. Transitions to FINAL when heading is within 15° of runway heading. |
+| FINAL | Aircraft steers directly toward the runway threshold. Transitions to LANDING state when within two frames' travel distance of the threshold. |
 
 ### Turn Radius Calculation
 
-Turn rate: 3°/sec (standard rate). Turn radius = speed / angular velocity. Since speed varies by aircraft, the turn radius scales linearly with speed. The base turn point is offset perpendicular to the runway centreline at a distance equal to the turn radius.
+Turn rate: 30°/sec. Turn radius = speed ÷ angular velocity (in rad/sec). Since speed varies by aircraft, the turn radius scales linearly with speed. The base turn point is offset perpendicular to the runway centreline at a distance equal to the turn radius.
 
 ## 3.4 Landing and Deceleration
 
@@ -187,10 +203,13 @@ The queue is the central player-interaction system. Aircraft in holding are plac
 | Mechanic | Behaviour |
 |----------|-----------|
 | Entry | Aircraft enters queue at the back when it begins holding |
-| Release | Automatic. When runway unlocks, the aircraft at position 1 (top) is immediately released to commence approach |
+| Automatic release | When the runway unlocks and the queue is non-empty, the aircraft at position 1 (top) is immediately released to commence approach. The runway is locked by that aircraft as it begins. |
+| Manual release (Cleared to Land) | The player may press the Cleared to Land button on any queue card at any time. The aircraft is immediately removed from the queue and commences approach. The runway is **not** locked by a manual release, so other aircraft may also be manually cleared. |
+| Simultaneous approaches | Multiple aircraft may be in the APPROACH state simultaneously if the player uses manual Cleared to Land releases. There is no hard limit; the player accepts the collision risk of concurrent approaches (see Section 6). |
 | Advancement | When an aircraft is released or diverts, all remaining aircraft advance one position |
 | Reordering | Player can drag and drop queue entries to change order |
 | Divert removal | Aircraft removed from queue when fuel timer hits zero |
+| Max queue size | Spawning is paused when the queue reaches 9 aircraft. Resumes when queue drops below 9. |
 
 ## 4.2 Queue and Runway Interaction
 
@@ -225,39 +244,69 @@ When a storm begins, the runway lock state depends on current activity. If the r
 
 ---
 
-# 6. Difficulty Scaling and Arrival System
+# 6. Collision Detection
 
-## 6.1 Arrival Timer
+Aircraft in the APPROACH or LANDING states can collide with each other. Collisions are the primary risk of using the Cleared to Land button to dispatch multiple aircraft simultaneously.
+
+## 6.1 Detection
+
+| Parameter | Value |
+|-----------|-------|
+| States checked | APPROACH and LANDING only (aircraft in HOLDING or ARRIVING cannot collide) |
+| Distance metric | L1 (Manhattan) distance in screen space: \|Δx\| + \|Δy\| |
+| Collision radii | Derived from the approach indicator diamond size: Small 12.6 px, Medium 18 px, Large 25.2 px |
+| Trigger | Collision occurs when the sum of two aircraft's radii equals or exceeds their L1 screen distance |
+
+## 6.2 Consequences
+
+| Consequence | Detail |
+|-------------|--------|
+| Both aircraft destroyed | Both are immediately removed from the simulation |
+| Financial penalty | Each aircraft's full value is deducted from the bank balance |
+| Runway freed | If the runway was locked by either aircraft, it is immediately unlocked |
+| Explosion effect | An explosion is rendered at the world-space midpoint between the two aircraft |
+
+## 6.3 Explosion Visual
+
+| Parameter | Value |
+|-----------|-------|
+| Duration | 1.5 seconds |
+| Shape | 12 radial spikes alternating between full length and 65% length |
+| Colour progression | White → orange → red-orange as explosion ages |
+| Centre | Radial gradient: white core fading to orange and then transparent |
+| Spike width | Decreases over the explosion lifetime |
+
+---
+
+# 7. Difficulty Scaling and Arrival System
+
+## 7.1 Arrival Timer
 
 Aircraft arrive on a timer with jitter. The base interval decreases over time, increasing pressure.
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| Starting interval | 40 seconds | Time between aircraft spawns at game start |
+| Starting interval | 20 seconds | Time between aircraft spawns at game start |
 | Jitter | ±3 seconds | Random offset applied to each spawn interval |
 | Ramp rate | Every 2 minutes | Interval at which difficulty increases |
 | Ramp amount | -5 seconds per step | Reduction in spawn interval per difficulty step |
-| Minimum interval | To be tuned | Floor value to prevent impossible spawn rates |
+| Minimum interval | 10 seconds | Floor value to prevent impossible spawn rates |
 
-## 6.2 Difficulty Progression Example
+## 7.2 Difficulty Progression Example
 
 | Game Time | Base Interval | Effective Range (with jitter) |
 |-----------|---------------|-------------------------------|
-| 0:00 – 2:00 | 40 sec | 37–43 sec |
-| 2:00 – 4:00 | 35 sec | 32–38 sec |
-| 4:00 – 6:00 | 30 sec | 27–33 sec |
-| 6:00 – 8:00 | 25 sec | 22–28 sec |
-| 8:00 – 10:00 | 20 sec | 17–23 sec |
-| 10:00 – 12:00 | 15 sec | 12–18 sec |
-| 12:00+ | 10 sec (floor TBD) | 7–13 sec |
+| 0:00 – 2:00 | 20 sec | 17–23 sec |
+| 2:00 – 4:00 | 15 sec | 12–18 sec |
+| 4:00 – 6:00 | 10 sec (floor) | 7–13 sec |
 
 The interaction between decreasing arrival intervals, weather events, and fuel endurance timers creates an escalating challenge. As intervals shrink, the queue grows faster, fuel pressure increases, and weather events become proportionally more punishing.
 
 ---
 
-# 7. User Interface Layout
+# 8. User Interface Layout
 
-## 7.1 Screen Composition
+## 8.1 Screen Composition
 
 The screen is divided into two areas: the game view (left/centre, approximately 70–75% of screen width) and the queue panel (right, approximately 25–30% of screen width).
 
@@ -267,28 +316,38 @@ Top-down, static camera. Contains the runway, holding pattern, aircraft, and app
 
 ### Queue Panel
 
-Displayed as a vertical list/table on the right side of the screen. Each entry is a card representing one queued aircraft.
+Displayed as a vertical list/table on the right side of the screen. The panel has two distinct areas: active aircraft and the holding queue.
+
+### Active Aircraft Cards
+
+Aircraft that have been cleared to land (in APPROACH or LANDING state) are shown at the top of the panel as non-draggable cards with a green border and dark green background. Each card shows: state label (APPROACH or LANDING), callsign, size, and monetary value.
+
+### Queue Cards
+
+Each queued (HOLDING) aircraft is shown as a draggable card below the active section.
 
 | Card Element | Content |
 |--------------|---------|
+| Position number | #1, #2, etc. Top of list = next to land automatically |
 | Callsign | 3-letter callsign (e.g. JRT) |
-| Fuel Endurance | Remaining time displayed as mm:ss, counting down in real time |
+| Size indicator | Small / Medium / Large |
+| Fuel Endurance | Remaining time displayed as M:SS, counting down in real time |
 | Value | Dollar value of the aircraft |
-| Position indicator | Top of list = next to land |
+| Cleared to Land button | "→ LAND" button. Click to immediately dispatch this aircraft to approach, regardless of runway state or queue position. |
 
 ### Queue Card Colour States
 
 | Condition | Card Colour | Meaning |
 |-----------|-------------|---------|
-| Endurance > 60 sec | Default (neutral) | Aircraft is safe |
-| Endurance ≤ 60 sec | Yellow | Warning: fuel getting low |
-| Endurance ≤ 30 sec | Red | Critical: imminent divert risk |
+| Endurance > 60 sec | Dark blue | Aircraft is safe |
+| Endurance ≤ 60 sec | Amber/brown | Warning: fuel getting low |
+| Endurance ≤ 30 sec | Dark red | Critical: imminent divert risk |
 
 ### Queue Interaction
 
-The player reorders the queue by clicking and dragging individual cards to a new position. This is the primary player interaction in the game. On the eventual iOS version, this will be a touch drag gesture.
+The player reorders the queue by clicking and dragging individual cards to a new position. Active aircraft cards (APPROACH/LANDING) cannot be dragged. On the eventual iOS version, this will be a touch drag gesture.
 
-## 7.2 Status Display
+## 8.2 Status Display
 
 The following information must be persistently visible to the player. Exact placement is a UI design decision for prototyping.
 
@@ -300,11 +359,11 @@ The following information must be persistently visible to the player. Exact plac
 | Game Time | Elapsed time since game start | Helps player anticipate difficulty ramps |
 | Weather Warning | Storm approaching / Storm active | Visual and/or text warning |
 
-## 7.3 Holding Pattern Visualisation
+## 8.3 Holding Pattern Visualisation
 
 Multiple aircraft may occupy the holding pattern simultaneously. Since this is a top-down view and vertical stacking is not visually distinct, aircraft in holding should be visually differentiated. Options for prototyping include: slight lateral offsets in orbit, callsign labels rendered on each aircraft, or different orbit sizes per queue position. The exact approach is a visual design decision to be resolved during prototyping.
 
-## 7.4 Aircraft State Indicators
+## 8.4 Aircraft State Indicators
 
 Aircraft render additional visual indicators overlaid on their silhouette to communicate state at a glance.
 
@@ -316,13 +375,37 @@ The approach indicator serves as an immediate visual cue that an aircraft has be
 
 No additional state indicators are defined at this time. Future states may receive indicators as the game is developed.
 
+## 8.5 Aircraft Visual Styles
+
+Each aircraft size category is rendered as a distinct top-down silhouette, rotated to match the aircraft's current heading. Silhouettes are size-proportional; larger aircraft occupy more screen space.
+
+| Size | Silhouette Style | Colour | Scale |
+|------|-----------------|--------|-------|
+| Small | Narrow fuselage, straight high wings, small horizontal stabiliser. Modelled on a light single-engine type (e.g. Cessna 172). | Green (#44CC44) | 0.7× baseline |
+| Medium | Wider fuselage, straight tapered wings, twin engine nacelles, T-tail configuration. Modelled on a regional turboprop type (e.g. Dash 8). | Blue (#4488FF) | 1.0× baseline |
+| Large | Wide fuselage, swept wings, four engine pods, swept horizontal stabiliser. Modelled on a wide-body jet type (e.g. Boeing 747). | Red (#FF4444) | 1.4× baseline |
+
+The distinct colours and shapes allow the player to identify aircraft size and value at a glance without reading the callsign or consulting the queue panel.
+
+## 8.6 Flight Path Trail Dots
+
+Each aircraft renders a short trail of dots behind it showing its recent path. Trails help the player read the current trajectory of all aircraft at once, particularly useful when multiple aircraft are in holding.
+
+| Parameter | Value |
+|-----------|-------|
+| Sample interval | One position recorded every 0.4 seconds |
+| History length | Last 3 positions retained |
+| Dot colour | Matches the aircraft's size colour |
+| Opacity | Fades from oldest (25%) to newest (75%) |
+| Size | Shrinks from newest to oldest |
+
 ---
 
-# 8. Tuning Configuration
+# 9. Tuning Configuration
 
 All tuning values must be centralised in a single configuration file or constants block. This enables rapid iteration during playtesting without code changes scattered across multiple modules.
 
-## 8.1 Complete Tuning Parameter Reference
+## 9.1 Complete Tuning Parameter Reference
 
 | Category | Parameter | Initial Value | Notes |
 |----------|-----------|---------------|-------|
@@ -340,48 +423,49 @@ All tuning values must be centralised in a single configuration file or constant
 | Aircraft | Small spawn weight | 50% | |
 | Aircraft | Medium spawn weight | 35% | |
 | Aircraft | Large spawn weight | 15% | |
-| Arrivals | Starting interval | 40 sec | |
+| Arrivals | Starting interval | 20 sec | |
 | Arrivals | Jitter | ±3 sec | |
 | Arrivals | Ramp frequency | Every 2 min | |
 | Arrivals | Ramp amount | -5 sec | |
-| Arrivals | Minimum interval | TBD | Needs playtesting |
+| Arrivals | Minimum interval | 10 sec | |
 | Holding | Outbound leg duration | 5 sec | |
-| Holding | Turn rate | 3°/sec | Standard rate turn |
-| Approach | Turn rate | 3°/sec | Same as holding |
+| Holding | Turn rate | 30°/sec | |
+| Approach | Turn rate | 30°/sec | Same as holding |
 | Landing | Stop point | 75% runway length | |
 | Weather | Storm min interval | 2 min | Time between storms |
 | Weather | Storm max interval | 5 min | |
 | Weather | Storm duration | 15 sec | |
-| Runway | Length | TBD (game units) | |
-| Runway | Width | TBD (game units) | |
+| Runway | Length | 600 game units | |
+| Runway | Width | 30 game units | |
 
 ---
 
-# 9. Design Notes and Watchpoints
+# 10. Design Notes and Watchpoints
 
-## 9.1 Death Spiral Risk
+
+## 10.1 Death Spiral Risk
 
 The divert penalty (subtracting aircraft value from balance) combined with weather events that lock the runway can create cascading failures. A single weather event during heavy traffic could cause multiple diverts, rapidly draining the bank balance. This may be the intended tension, or it may need mitigation. Possible mitigations to test include: capping the number of simultaneous diverts, reducing divert penalty to a fraction of aircraft value, or providing a brief grace period after weather clears before fuel timers resume. This is a priority playtesting item.
 
-## 9.2 Queue Ordering as Core Mechanic
+## 10.2 Queue Ordering as Core Mechanic
 
 The player's primary agency is queue reordering. The key decisions are: prioritise low-fuel aircraft to prevent diverts (defensive play), or prioritise fast/large aircraft to clear the runway quickly and earn more (aggressive play). The tension between these strategies is the game. If playtesting reveals that one strategy always dominates, the tuning values (speed, fuel, value) should be adjusted to restore meaningful choice.
 
-## 9.3 Speed-Based Geometry
+## 10.3 Speed-Based Geometry
 
-Using speed to drive all position calculations (holding pattern shape, approach arc width, runway deceleration) means the simulation is internally consistent. However, this requires careful implementation of the physics update loop. Position should be updated each frame based on speed and heading, with heading changes capped at 3°/sec during turns. The game loop should use a fixed time step (e.g. 60 updates per second) or delta-time scaling to ensure consistent behaviour regardless of frame rate.
+Using speed to drive all position calculations (holding pattern shape, approach arc width, runway deceleration) means the simulation is internally consistent. However, this requires careful implementation of the physics update loop. Position should be updated each frame based on speed and heading, with heading changes capped at 30°/sec during turns. The game loop should use a fixed time step (e.g. 60 updates per second) or delta-time scaling to ensure consistent behaviour regardless of frame rate.
 
-## 9.4 Abstract Game Units
+## 10.4 Abstract Game Units
 
 All spatial values are in abstract game units with no fixed pixel mapping. The prototype should establish a coordinate system where the runway, holding fix, spawn point, and final approach point are positioned relative to each other in game units. Visual rendering then maps game units to screen coordinates with a configurable scale factor. This allows the same game logic to run at any resolution.
 
-## 9.5 Future Features (Backlog)
+## 10.5 Future Features (Backlog)
 
 The following features have been discussed but are explicitly out of scope for the prototype. They are noted here for future reference: multiple runways, runway size restrictions (small runway cannot accept large aircraft), helicopter pads, scoring and leaderboards, unlockable upgrades and progression, and additional game events beyond weather.
 
 ---
 
-# 10. Glossary
+# 11. Glossary
 
 | Term | Definition |
 |------|------------|
