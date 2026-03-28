@@ -38,32 +38,60 @@ class AnthropicAPIClient {
         }
     }
 
-    // Fetch usage for the current billing period (month)
-    func fetchUsage() async throws -> UsageSnapshot {
-        guard let apiKey = apiKey, !apiKey.isEmpty else {
+    // Fetch all three windows (monthly / weekly / hourly) in parallel.
+    func fetchAllWindows() async throws -> UsageWindows {
+        guard let key = apiKey, !key.isEmpty else {
             throw APIError.noAPIKey
         }
 
-        // Calculate current billing period (calendar month)
-        let calendar = Calendar.current
         let now = Date()
-        let components = calendar.dateComponents([.year, .month], from: now)
-        let periodStart = calendar.date(from: components)!
-        let periodEnd = calendar.date(byAdding: .month, value: 1, to: periodStart)!
+        let calendar = Calendar.current
 
+        // Monthly: current billing calendar month
+        let monthComps = calendar.dateComponents([.year, .month], from: now)
+        let monthStart = calendar.date(from: monthComps)!
+        let monthEnd   = calendar.date(byAdding: .month, value: 1, to: monthStart)!
+
+        // Weekly: rolling 7 days
+        let weekStart  = calendar.date(byAdding: .day, value: -7, to: now)!
+        let weekEnd    = calendar.date(byAdding: .day, value: 1, to: now)!
+
+        // Hourly: rolling configurable window (default 8 h)
+        let hoursBack  = Preferences.hourlyWindowHours
+        let hourStart  = calendar.date(byAdding: .hour, value: -hoursBack, to: now)!
+        let hourEnd    = now
+
+        // Fire all three requests concurrently
+        async let monthlyRaw = fetchWindow(start: monthStart, end: monthEnd, apiKey: key)
+        async let weeklyRaw  = fetchWindow(start: weekStart,  end: weekEnd,  apiKey: key)
+        async let hourlyRaw  = fetchWindow(start: hourStart,  end: hourEnd,  apiKey: key)
+
+        let (mRaw, wRaw, hRaw) = try await (monthlyRaw, weeklyRaw, hourlyRaw)
+
+        return UsageWindows(
+            monthly: buildSnapshot(mRaw, kind: .monthly, start: monthStart, end: monthEnd,
+                                   limit: Preferences.monthlyTokenLimit),
+            weekly:  buildSnapshot(wRaw, kind: .weekly,  start: weekStart,  end: weekEnd,
+                                   limit: Preferences.weeklyTokenLimit),
+            hourly:  buildSnapshot(hRaw, kind: .hourly,  start: hourStart,  end: hourEnd,
+                                   limit: Preferences.hourlyTokenLimit),
+            fetchedAt: now
+        )
+    }
+
+    // MARK: - Private helpers
+
+    private func fetchWindow(start: Date, end: Date, apiKey: String) async throws -> AnthropicUsageResponse {
         let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        let startStr = formatter.string(from: periodStart)
-        let endStr = formatter.string(from: periodEnd)
+        formatter.formatOptions = [.withInternetDateTime]
 
-        // Query usage endpoint
-        var components2 = URLComponents(string: "\(baseURL)/usage")!
-        components2.queryItems = [
-            URLQueryItem(name: "start_time", value: startStr),
-            URLQueryItem(name: "end_time", value: endStr)
+        var comps = URLComponents(string: "\(baseURL)/usage")!
+        comps.queryItems = [
+            URLQueryItem(name: "start_time", value: formatter.string(from: start)),
+            URLQueryItem(name: "end_time",   value: formatter.string(from: end))
         ]
 
-        var request = URLRequest(url: components2.url!)
+        var request = URLRequest(url: comps.url!)
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -71,34 +99,31 @@ class AnthropicAPIClient {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse else {
+        guard let http = response as? HTTPURLResponse else {
             throw APIError.networkError(URLError(.badServerResponse))
         }
-
-        switch httpResponse.statusCode {
-        case 200:
-            break
-        case 429:
-            throw APIError.rateLimited
-        default:
-            throw APIError.invalidResponse(httpResponse.statusCode)
+        switch http.statusCode {
+        case 200: break
+        case 429: throw APIError.rateLimited
+        default:  throw APIError.invalidResponse(http.statusCode)
         }
 
         do {
-            let usageResponse = try JSONDecoder().decode(AnthropicUsageResponse.self, from: data)
-            return buildSnapshot(from: usageResponse, periodStart: periodStart, periodEnd: periodEnd)
+            return try JSONDecoder().decode(AnthropicUsageResponse.self, from: data)
         } catch {
             throw APIError.decodingFailed(error)
         }
     }
 
     private func buildSnapshot(
-        from response: AnthropicUsageResponse,
-        periodStart: Date,
-        periodEnd: Date
+        _ response: AnthropicUsageResponse,
+        kind: WindowKind,
+        start: Date,
+        end: Date,
+        limit: Int
     ) -> UsageSnapshot {
         var totalUsed = 0
-        var modelBreakdown: [String: Int] = [:]
+        var breakdown: [String: Int] = [:]
 
         for record in response.data {
             let tokens = (record.inputTokens ?? 0)
@@ -107,19 +132,17 @@ class AnthropicAPIClient {
                 + (record.cacheCreationInputTokens ?? 0)
             totalUsed += tokens
             if let model = record.model {
-                modelBreakdown[model, default: 0] += tokens
+                breakdown[model, default: 0] += tokens
             }
         }
 
-        let limit = UserDefaults.standard.integer(forKey: "monthly_token_limit")
-        let effectiveLimit = limit > 0 ? limit : Preferences.defaultMonthlyLimit
-
         return UsageSnapshot(
+            kind: kind,
             used: totalUsed,
-            limit: effectiveLimit,
-            periodStart: periodStart,
-            periodEnd: periodEnd,
-            modelBreakdown: modelBreakdown
+            limit: limit,
+            periodStart: start,
+            periodEnd: end,
+            modelBreakdown: breakdown
         )
     }
 }

@@ -4,14 +4,14 @@ class StatusBarController {
     private var statusItem: NSStatusItem
     private var refreshTimer: Timer?
     private let apiClient = AnthropicAPIClient()
-    private var currentSnapshot: UsageSnapshot?
-    private var lastError: String?
+    private var currentWindows: UsageWindows?
     private var isLoading = false
 
-    // Menu items
-    private var usageTitleItem: NSMenuItem!
-    private var percentageBarItem: NSMenuItem!
-    private var detailsItem: NSMenuItem!
+    // Menu items — one row per window
+    private var monthlyRowItem: NSMenuItem!
+    private var weeklyRowItem: NSMenuItem!
+    private var hourlyRowItem: NSMenuItem!
+    private var resetsItem: NSMenuItem!
     private var modelBreakdownMenu: NSMenu!
     private var lastUpdatedItem: NSMenuItem!
     private var refreshItem: NSMenuItem!
@@ -22,6 +22,10 @@ class StatusBarController {
         setupMenu()
         refresh()
         scheduleTimer()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(prefsChanged),
+            name: .preferencesDidChange, object: nil
+        )
     }
 
     // MARK: - Setup
@@ -30,35 +34,37 @@ class StatusBarController {
         guard let button = statusItem.button else { return }
         button.image = MenuBarIconRenderer.makeLoadingIcon()
         button.imagePosition = .imageLeft
-        button.title = " ---%"
+        button.title = " ..."
     }
 
     private func setupMenu() {
         let menu = NSMenu()
 
-        // Header: app name
         let headerItem = NSMenuItem(title: "Claude Token Monitor", action: nil, keyEquivalent: "")
         headerItem.isEnabled = false
         menu.addItem(headerItem)
 
         menu.addItem(.separator())
 
-        // Usage title (e.g. "This month: 12.3M / 50M tokens")
-        usageTitleItem = NSMenuItem(title: "Fetching usage...", action: nil, keyEquivalent: "")
-        usageTitleItem.isEnabled = false
-        menu.addItem(usageTitleItem)
+        // Three window rows
+        monthlyRowItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        monthlyRowItem.isEnabled = false
+        menu.addItem(monthlyRowItem)
 
-        // Inline visual bar (rendered as attributed string)
-        percentageBarItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        percentageBarItem.isEnabled = false
-        menu.addItem(percentageBarItem)
+        weeklyRowItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        weeklyRowItem.isEnabled = false
+        menu.addItem(weeklyRowItem)
+
+        hourlyRowItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        hourlyRowItem.isEnabled = false
+        menu.addItem(hourlyRowItem)
 
         menu.addItem(.separator())
 
-        // Details: remaining + period end
-        detailsItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        detailsItem.isEnabled = false
-        menu.addItem(detailsItem)
+        // Reset times
+        resetsItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        resetsItem.isEnabled = false
+        menu.addItem(resetsItem)
 
         // Model breakdown submenu
         let breakdownItem = NSMenuItem(title: "By model", action: nil, keyEquivalent: "")
@@ -68,24 +74,20 @@ class StatusBarController {
 
         menu.addItem(.separator())
 
-        // Last updated
-        lastUpdatedItem = NSMenuItem(title: "Last updated: never", action: nil, keyEquivalent: "")
+        lastUpdatedItem = NSMenuItem(title: "Last updated: —", action: nil, keyEquivalent: "")
         lastUpdatedItem.isEnabled = false
         menu.addItem(lastUpdatedItem)
 
-        // Refresh now
         refreshItem = NSMenuItem(title: "Refresh Now", action: #selector(refreshNow), keyEquivalent: "r")
         refreshItem.target = self
         menu.addItem(refreshItem)
 
         menu.addItem(.separator())
 
-        // Preferences
         let prefsItem = NSMenuItem(title: "Preferences...", action: #selector(openPreferences), keyEquivalent: ",")
         prefsItem.target = self
         menu.addItem(prefsItem)
 
-        // Quit
         let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
@@ -102,26 +104,23 @@ class StatusBarController {
 
     private func scheduleTimer() {
         refreshTimer?.invalidate()
-        let interval = Preferences.refreshInterval
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            self?.refresh()
-        }
+        refreshTimer = Timer.scheduledTimer(
+            withTimeInterval: Preferences.refreshInterval, repeats: true
+        ) { [weak self] _ in self?.refresh() }
     }
 
     func refresh() {
         guard !isLoading else { return }
         isLoading = true
-        updateButton(loading: true)
+        if currentWindows == nil { updateButton(loading: true) }
 
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let snapshot = try await self.apiClient.fetchUsage()
-                self.currentSnapshot = snapshot
-                self.lastError = nil
-                self.updateUI(with: snapshot)
+                let windows = try await self.apiClient.fetchAllWindows()
+                self.currentWindows = windows
+                self.updateUI(with: windows)
             } catch {
-                self.lastError = error.localizedDescription
                 self.updateErrorUI(error.localizedDescription)
             }
             self.isLoading = false
@@ -132,77 +131,79 @@ class StatusBarController {
 
     private func updateButton(loading: Bool) {
         guard let button = statusItem.button else { return }
-        if loading && currentSnapshot == nil {
-            button.image = MenuBarIconRenderer.makeLoadingIcon()
-            button.title = " ..."
-        }
+        button.image = MenuBarIconRenderer.makeLoadingIcon()
+        button.title = " ..."
     }
 
-    private func updateUI(with snapshot: UsageSnapshot) {
+    private func updateUI(with windows: UsageWindows) {
         guard let button = statusItem.button else { return }
 
-        let pct = snapshot.percentageRemaining
-        let pctInt = Int(pct * 100)
-
-        // Update status bar button
+        // The icon tracks whichever window is most constrained
+        let (constrainedKind, constrained) = windows.mostConstrained
+        let pct = constrained.percentageRemaining
         button.image = MenuBarIconRenderer.makeIcon(percentageRemaining: pct)
         button.imagePosition = .imageLeft
-        button.title = " \(pctInt)%"
+        button.title = " \(Int(pct * 100))%"
 
-        // Usage title
-        usageTitleItem.title = "This month: \(snapshot.formattedUsed) / \(snapshot.formattedLimit) tokens"
+        // If not the monthly window, show a label so the user knows what's constrained
+        if constrainedKind != .monthly {
+            button.title = " \(constrainedKind.displayName.prefix(1)) \(Int(pct * 100))%"
+        }
 
-        // Visual bar in menu (ASCII-style for simplicity)
-        percentageBarItem.attributedTitle = makeBarAttributedString(pct: pct)
+        // Window rows
+        monthlyRowItem.attributedTitle = makeWindowRow(windows.monthly, label: "Monthly ")
+        weeklyRowItem.attributedTitle  = makeWindowRow(windows.weekly,  label: "Weekly  ")
+        hourlyRowItem.attributedTitle  = makeWindowRow(windows.hourly,  label: "Hourly  ")
 
-        // Details
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateStyle = .medium
-        dateFormatter.timeStyle = .none
-        let periodEndStr = dateFormatter.string(from: snapshot.periodEnd)
-        detailsItem.title = "\(snapshot.formattedRemaining) remaining · resets \(periodEndStr)"
+        // Reset times summary
+        resetsItem.attributedTitle = makeResetsString(windows)
 
-        // Model breakdown
+        // Model breakdown (from monthly snapshot — largest token set)
         modelBreakdownMenu.removeAllItems()
-        if snapshot.modelBreakdown.isEmpty {
-            let emptyItem = NSMenuItem(title: "No breakdown available", action: nil, keyEquivalent: "")
-            emptyItem.isEnabled = false
-            modelBreakdownMenu.addItem(emptyItem)
+        let breakdown = windows.monthly.modelBreakdown
+        if breakdown.isEmpty {
+            let empty = NSMenuItem(title: "No breakdown available", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            modelBreakdownMenu.addItem(empty)
         } else {
-            let sorted = snapshot.modelBreakdown.sorted { $0.value > $1.value }
-            for (model, tokens) in sorted {
+            for (model, tokens) in breakdown.sorted(by: { $0.value > $1.value }) {
                 let shortModel = model.replacingOccurrences(of: "claude-", with: "")
-                let item = NSMenuItem(title: "\(shortModel): \(formatTokenCount(tokens))", action: nil, keyEquivalent: "")
+                let item = NSMenuItem(
+                    title: "\(shortModel): \(formatTokenCount(tokens))",
+                    action: nil, keyEquivalent: ""
+                )
                 item.isEnabled = false
                 modelBreakdownMenu.addItem(item)
             }
         }
 
-        // Last updated
-        let timeFormatter = DateFormatter()
-        timeFormatter.timeStyle = .short
-        lastUpdatedItem.title = "Last updated: \(timeFormatter.string(from: Date()))"
+        let tf = DateFormatter()
+        tf.timeStyle = .short
+        lastUpdatedItem.title = "Last updated: \(tf.string(from: windows.fetchedAt))"
     }
 
     private func updateErrorUI(_ message: String) {
         guard let button = statusItem.button else { return }
         button.image = MenuBarIconRenderer.makeErrorIcon()
         button.title = " !"
-
-        usageTitleItem.title = "Error fetching usage"
-        percentageBarItem.title = message.prefix(60).description
-        detailsItem.title = "Check API key in Preferences"
+        monthlyRowItem.title = "Error fetching usage"
+        weeklyRowItem.title  = ""
+        hourlyRowItem.title  = message.prefix(55).description
+        resetsItem.title     = "Check API key in Preferences"
         lastUpdatedItem.title = "Failed: \(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short))"
     }
 
-    private func makeBarAttributedString(pct: Double) -> NSAttributedString {
-        let totalBlocks = 20
-        let filledBlocks = Int(pct * Double(totalBlocks))
-        let emptyBlocks = totalBlocks - filledBlocks
+    // MARK: - String builders
 
-        let filled = String(repeating: "█", count: filledBlocks)
-        let empty = String(repeating: "░", count: emptyBlocks)
-        let bar = "[\(filled)\(empty)] \(Int(pct * 100))%"
+    /// One row: "Monthly  [████████░░░░░░░░░░░░] 40%  20M / 50M"
+    private func makeWindowRow(_ snapshot: UsageSnapshot, label: String) -> NSAttributedString {
+        let pct = snapshot.percentageRemaining
+        let totalBlocks = 16
+        let filled = Int(pct * Double(totalBlocks))
+        let empty = totalBlocks - filled
+        let bar = String(repeating: "█", count: filled) + String(repeating: "░", count: empty)
+        let pctStr = String(format: "%3d%%", Int(pct * 100))
+        let text = "\(label)[\(bar)] \(pctStr)  \(snapshot.formattedUsed) / \(snapshot.formattedLimit)"
 
         let color: NSColor
         switch pct {
@@ -211,15 +212,41 @@ class StatusBarController {
         default:         color = .systemRed
         }
 
-        return NSAttributedString(string: bar, attributes: [
+        return NSAttributedString(string: text, attributes: [
             .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
             .foregroundColor: color
         ])
     }
 
+    /// "Resets: monthly Apr 1 · weekly Thu · hourly 6:42 PM"
+    private func makeResetsString(_ windows: UsageWindows) -> NSAttributedString {
+        let df = DateFormatter()
+
+        df.dateFormat = "MMM d"
+        let monthlyReset = df.string(from: windows.monthly.periodEnd)
+
+        df.dateFormat = "EEE"
+        let weeklyReset = df.string(from: windows.weekly.periodEnd)
+
+        df.dateStyle = .none
+        df.timeStyle = .short
+        let hourlyReset = df.string(from: windows.hourly.periodEnd)
+
+        let hours = Preferences.hourlyWindowHours
+        let text = "Resets: monthly \(monthlyReset) · weekly \(weeklyReset) · \(hours)h window \(hourlyReset)"
+
+        return NSAttributedString(string: text, attributes: [
+            .font: NSFont.systemFont(ofSize: 10),
+            .foregroundColor: NSColor.secondaryLabelColor
+        ])
+    }
+
     // MARK: - Actions
 
-    @objc private func refreshNow() {
+    @objc private func refreshNow() { refresh() }
+
+    @objc private func prefsChanged() {
+        scheduleTimer()
         refresh()
     }
 
@@ -228,7 +255,5 @@ class StatusBarController {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    @objc private func quit() {
-        NSApp.terminate(nil)
-    }
+    @objc private func quit() { NSApp.terminate(nil) }
 }
